@@ -1,12 +1,14 @@
+use std::net::UdpSocket;
+use std::sync::Mutex;
+
+pub static POSITIONS: Mutex<Vec<Axis>> = Mutex::new(Vec::new());
+
 #[allow(non_snake_case)]
 pub struct Axis {
     pub X: f64,
     pub Y: f64,
     pub Z: f64,
 }
-
-
-#[allow(dead_code)]
 pub struct Motion {
     pub location: Axis,
     pub speed: f64,
@@ -15,6 +17,7 @@ pub struct Motion {
     pub gps_location: Axis,
 }
 
+#[allow(dead_code)]
 pub fn print_motion(motion: &mut Motion) {
     println!("location X: {} Y: {} Z: {}", motion.location.X, motion.location.Y, motion.location.Z);
     println!("speed: {}", motion.speed);
@@ -42,5 +45,13 @@ pub fn set_axis(values: &Vec<&str>, axis: &mut Axis, field: &str) {
     match values[3].parse::<f64>() {
         Ok(z)=> axis.Z = z,
         Err(e) => println!("Error in {field} fields conversion {e}")
+    }
+    if field == "TRUE POSITION" { POSITIONS.lock().unwrap().push(Axis{X: axis.X, Y: axis.Y, Z: axis.Z}); }
+}
+
+pub fn send_message_to(socket: &UdpSocket, addr: &str, buffer: &[u8]) {
+    match socket.send_to(buffer, addr) {
+        Ok(bytes_sent) => println!("Sent {} bytes", bytes_sent),
+        Err(e) =>eprintln!("Error sending data: {}", e)
     }
 }
