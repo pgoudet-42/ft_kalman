@@ -1,39 +1,26 @@
-import numpy as np
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
-from matplotlib.animation import FuncAnimation
+import numpy as np
 
-# Fonction pour générer des données 3D
-def generate_data(t):
-    x = np.sin(t)
-    y = np.cos(t)
-    z = t
-    return x, y, z
+# Créez les données
+x = np.linspace(0, 10, 100)
+y = np.sin(x)
+z = np.cos(x)
 
-# Initialisation du graphe 3D
+# Calculez l'incertitude
+incertitude_x = 0.1 * x
+incertitude_y = 0.1 * y
+incertitude_z = 0.1 * z
+
+# Créez l'axe 3D
 fig = plt.figure()
 ax = fig.add_subplot(111, projection='3d')
 
-# Paramètres de l'animation
-num_frames = 100
-t_values = np.linspace(0, 20, num_frames)
+# Tracez la ligne originale
+ax.plot(x, y, z)
 
-# Fonction de mise à jour de l'animation
-def update(frame):
-    ax.cla()  # Efface le graphe à chaque itération
-    ax.set_title(f'Frame {frame}/{num_frames}')
-    
-    # Génère les nouvelles données pour le nouveau frame
-    x, y, z = generate_data(t_values[frame])
+# Tracez la zone d'incertitude
+ax.plot_trisurf(x + incertitude_x, y + incertitude_y, z + incertitude_z, linewidth=0, antialiased=False)
 
-    # Crée le graphe 3D
-    ax.scatter(x, y, z, c='r', marker='o')
-    ax.set_xlabel('X Label')
-    ax.set_ylabel('Y Label')
-    ax.set_zlabel('Z Label')
-
-# Crée l'animation
-animation = FuncAnimation(fig, update, frames=num_frames, interval=100)
-
-# Affiche l'animation
+# Affichez le graphique
 plt.show()
