@@ -28,23 +28,46 @@ def computeNewPosition(predict: Motion):
     new_position = old_position + speed3d * time + 1/2 * acceleration * time ** 2
     return Axis(X=new_position[0], Y=new_position[1], Z=new_position[2])
 
+def predictState(predict):
+    σv = 0.001
+    time = 1/300
+    
+    state = np.array([
+        predict.position.X[-1],
+        predict.position.Y[-1],
+        predict.position.Z[-1],
+        predict.speed3d.X[-1],
+        predict.speed3d.Y[-1],
+        predict.speed3d.Z[-1],
+        predict.acceleration.X[-1],
+        predict.acceleration.Y[-1],
+        predict.acceleration.Z[-1],
+    ])
+    
+    F = np.array([
+        [1, 0, 0, time, 0    , 0   , 0.5*time**2, 0          , 0          ],
+        [0, 1, 0, 0   , time , 0   , 0          , 0.5*time**2, 0          ],
+        [0, 0, 1, 0   , 0    , time, 0          , 0          , 0.5*time**2],
+        [0, 0, 0, 1   , 0    , 0   , time       , 0          , 0          ],
+        [0, 0, 0, 0   , 1    , 0   , 0          , time       , 0          ],
+        [0, 0, 0, 0   , 0    , 1   , 0          , 0          , time       ],
+        [0, 0, 0, 0   , 0    , 0   , 1          , 0          , 0          ],
+        [0, 0, 0, 0   , 0    , 0   , 0          , 1          , 0          ],
+        [0, 0, 0, 0   , 0    , 0   , 0          , 0          , 1          ],
+    ])
+    new_state = np.dot(F, state)
+    predict.position.append(predict.position)
+
 def calculateNewCoordonates(predict: Motion, new_acceleration: Axis, new_orientation: EulerAngles):
     v = np.array([predict.direction[-1].ψ, predict.direction[-1].θ, predict.direction[-1].φ])
-    vector = changeRefWithEuler(v, new_orientation.ψ, new_orientation.θ, new_orientation.φ)
+    vector = changeRefWithEuler([1,1,1], new_orientation.ψ, new_orientation.θ, new_orientation.φ)
     norm = np.linalg.norm(vector)
     vector_normalise = vector / norm
     vector_normalise = Axis(X=vector_normalise[0], Y=vector_normalise[1], Z=vector_normalise[2])
     speed3D = scalarSpeedTo3DSpeed(vector_normalise, np.float64(predict.speed[-1]))
     predict.speed3d.append(speed3D)
-    # predict.speed3d.append(Axis(
-    #     X=speed3D.X + new_acceleration.X,
-    #     Y=speed3D.Y + new_acceleration.Y,
-    #     Z=speed3D.Z + new_acceleration.Z,
-    # ))
+    
     predict.speed.append(speed3DToScalar(predict.speed3d[-1]))
     predict.acceleration.append(new_acceleration)
     predict.direction.append(new_orientation)
     predict.position.append(computeNewPosition(predict))
-    # print("verification:", np.sqrt(predict.speed3d[-1].X ** 2 + predict.speed3d[-1].Y ** 2 + predict.speed3d[-1].Z ** 2))
-    # print(predict)
-    # exit(1)
