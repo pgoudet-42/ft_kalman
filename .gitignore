@@ -1,4 +1,29 @@
-ft_kalman_python/venv
-ft_kalman_python/.vscode
-ft_kalman_python/__pycache__
-ft_kalman/target/debug
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.venv/
+venv/
+ENV/
+env/
+*.egg-info/
+*.egg
+dist/
+build/
+*.log
+
+# Rust
+target/
+**/*.rs.bk
+
+# IDEs
+.idea/
+*.sublime-project
+*.sublime-workspace
+*.code-workspace
+.vscode/
+
+# OS files
+.DS_Store
+Thumbs.db
