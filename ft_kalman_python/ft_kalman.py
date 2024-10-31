@@ -1,100 +1,188 @@
-#!/usr/bin/python3
-
+#!/home/pgoudet/work/ft_kalman/ft_kalman_python/venv/bin/python3
 import socket
 import matplotlib.pyplot as plt
 from structs import Axis, Motion, EulerAngles
-from kalman_compute import calculateNewCoordonates
-from init_values import init_speed3d, setValuesFirstTime
+from kalman_compute import calculateNewCoordonates, computeVelocity
+from init_values import setValuesFirstTime, setValuesOtherTimes, endProg
+from filterpy.kalman import KalmanFilter
+from filterpy.common import Q_discrete_white_noise
+import numpy as np
+import re
+from datetime import datetime
+import argparse
 
-def cleamMotions(predict, debug):
-    predict.position = predict.position[1:]
-    predict.speed = predict.speed[1:]
-    predict.speed3d = predict.speed3d[1:]
-    predict.acceleration = predict.acceleration[1:]
-    predict.direction = predict.direction[1:]
-    debug.position = debug.position[1:]
-    debug.speed = debug.speed[1:]
-    debug.speed3d = debug.speed3d[1:]
-    debug.acceleration = debug.acceleration[1:]
-    debug.direction = debug.direction[1:]
+parser = argparse.ArgumentParser(description="filtre de kalman avec option de debug.")
+TIME: datetime = datetime(1970, 1, 1)
+GREEN = "\033[92m"
+RESET = "\033[0m"
+σ_ACC = 10**-3
+σ_GYR = 10**-2
+σ_GPS = 10**-1
+DT = 1/100
 
-def displayGraph2D(predict: Motion, debug: Motion):
-    cleamMotions(predict, debug)
-    predict_xs = [e.X for e in predict.position]
-    predict_ys = [e.Y for e in predict.position]
-    debug_xs = [e.X for e in debug.position]
-    debug_ys = [e.Y for e in debug.position]
-    ax = plt.figure().add_subplot()
-    ax.plot(predict_xs, predict_ys, color='b', label="Prediction", linewidth=2.5)
-    ax.plot(debug_xs, debug_ys, color='g', label="Truth")
-    ax.legend()
-    plt.show()
-
-def displayGraph3D(predict: Motion, debug: Motion):
-    cleamMotions(predict, debug)
-    predict_xs = [e.X for e in predict.position]
-    predict_ys = [e.Y for e in predict.position]
-    predict_zs = [e.Z for e in predict.position]
-    debug_xs = [e.X for e in debug.position]
-    debug_ys = [e.Y for e in debug.position]
-    debug_zs = [e.Z for e in debug.position]
-    ax = plt.figure().add_subplot(projection='3d')
-    ax.plot(predict_xs, predict_ys, predict_zs, color='b', label="Prediction")
-    ax.plot(debug_xs, debug_ys, debug_zs, color='g', label="Truth")
-    ax.legend()
-    plt.show()
-
-def setValuesOtherTimes(info, debug, acceleration, orientation):
-    if info[0][14:] == "TRUE POSITION":
-        debug.position.append(Axis(float(info[1:-1][0]), float(info[1:-1][1]), float(info[1:-1][2])))
-    elif info[0][14:] == "SPEED":
-        debug.speed.append(float(info[1]))
-    elif info[0][14:] == "ACCELERATION":
-        acceleration.X, acceleration.Y, acceleration.Z = (float(info[1:-1][0]), float(info[1:-1][1]), float(info[1:-1][2]))
-        debug.acceleration.append(Axis(float(info[1:-1][0]), float(info[1:-1][1]), float(info[1:-1][2])))
-    elif info[0][14:] == "DIRECTION":
-        orientation.ψ, orientation.θ, orientation.φ = (float(info[1:-1][0]), float(info[1:-1][1]), float(info[1:-1][2]))
-        debug.direction.append(EulerAngles(float(info[1:-1][0]), float(info[1:-1][1]), float(info[1:-1][2])))
-    return info[0][14:]
-
-
-def getData(udp_socket, predict, debug, first_time):
-    newValues_acceleration: Axis = Axis(X=0, Y=0, Z=0)
-    newValues_orientation: EulerAngles = EulerAngles(ψ=0, θ=0, φ=0)
+def getData(udp_socket, predict, debug, first_time, f, variances, args):
+    global TIME, DT
+    f: KalmanFilter
+    newValues_acceleration = Axis(X=0, Y=0, Z=0)
+    newValues_orientation = EulerAngles(φ=0, θ=0, ψ=0)
+    newValues_position = Axis(X=0, Y=0, Z=0)
     data = b""
     while data != "MSG_END".encode():
         try:
             data, _ = udp_socket.recvfrom(1024)
         except TimeoutError as e:
-            print(e.__repr__())
-            displayGraph3D(predict, debug)
-            displayGraph2D(predict, debug)
-            exit(1)
+            endProg(udp_socket, predict, debug, variances, e, TIME)
         mess = data.decode()
         info = mess.split("\n")
-        print(data)
-        setValuesFirstTime(info, predict, debug) if first_time else setValuesOtherTimes(info, debug, newValues_acceleration, newValues_orientation)
-    init_speed3d(predict) if first_time == True else calculateNewCoordonates(predict, newValues_acceleration, newValues_orientation)
+        if re.match("\[\d{2}:\d{2}:\d{2}\.\d{3}\]", info[0][:14]):
+            TIME = datetime.strptime(info[0][:14], "[%H:%M:%S.%f]").time()
+        setValuesFirstTime(info, predict, debug) if first_time else setValuesOtherTimes(info, debug, newValues_acceleration, newValues_orientation, newValues_position)
+    if first_time == False:
+        calculateNewCoordonates(predict, newValues_acceleration, newValues_orientation, f, args, newValues_position, debug, TIME)
+        P_matrix = f.P
+        v = P_matrix.diagonal()
+        variances = np.vstack([variances, np.array([v[0], v[1], v[2], v[3], v[4]])])
+    else:
+        vel, _ = computeVelocity(predict.direction[-1], predict.acceleration[-1], np.array([[predict.speed[-1]], [0], [0]]), DT)
+        vel = vel.reshape(3, )
+        predict.speed3d.append(Axis(vel[0], vel[1], vel[2]))
+        f.x = np.array([[predict.position[-1].X], [predict.position[-1].Y], [predict.position[-1].Z],
+                        [predict.speed3d[-1].X], [predict.speed3d[-1].Y], [predict.speed3d[-1].Z]])
+    return variances
+
+def setMatrix():
+    global DT
+
+    f = KalmanFilter(dim_x=6, dim_z=3)
+    f.x = None
+    #state matrix
+    f.F = np.array([
+        [1, 0, 0, DT, 0 , 0 ],
+        [0, 1, 0, 0 , DT, 0 ],
+        [0, 0, 1, 0 , 0 , DT],
+        [0, 0, 0, 1 , 0 , 0 ],
+        [0, 0, 0, 0 , 1 , 0 ],
+        [0, 0, 0, 0 , 0 , 1 ],
+    ])
+    
+    #measurement matrix
+    f.H = np.array([  
+                    [1, 0, 0, 0, 0, 0],
+                    [0, 1, 0, 0, 0, 0],
+                    [0, 0, 1, 0, 0, 0]
+                ])
+    
+    # control matrix
+    f.B =  np.array([ 
+                    [(DT**2) / 2, 0          , 0          ],
+                    [0          , (DT**2) / 2, 0          ],
+                    [0          , 0          , (DT**2) / 2],
+                    [DT         , 0          , 0          ],
+                    [0          , DT         , 0          ],
+                    [0          , 0          , DT         ]
+                ])
+
+    # process noise matrix
+    continous_position = np.array([
+        [DT**2 / 2, 0        , 0        , 0, 0, 0],
+        [0        , DT**2 / 2, 0        , 0, 0, 0],
+        [0        , 0        , DT**2 / 2, 0, 0, 0],
+        [0        , 0        , 0        , 0, 0, 0],
+        [0        , 0        , 0        , 0, 0, 0],
+        [0        , 0        , 0        , 0, 0, 0]
+    ])
+
+    continous_acceleration = np.array([
+        [DT**2 / 2, 0        , 0        , DT**2 / 2, 0        , 0        ],
+        [0        , DT**2 / 2, 0        , 0        , DT**2 / 2, 0        ],
+        [0        , 0        , DT**2 / 2, 0        , 0        , DT**2 / 2],
+        [0        , 0        , 0        , DT       , 0        , 0        ],
+        [0        , 0        , 0        , 0        , DT       , 0        ],
+        [0        , 0        , 0        , 0        , 0        , DT       ]
+    ])
+
+    continous_speed = np.array([
+        [0, 0, 0, DT**2 / 2, 0        , 0        ],
+        [0, 0, 0, 0        , DT**2 / 2, 0        ],
+        [0, 0, 0, 0        , 0        , DT**2 / 2],
+        [0, 0, 0, DT       , 0        , 0        ],
+        [0, 0, 0, 0        , DT       , 0        ],
+        [0, 0, 0, 0        , 0        , DT       ]
+    ])
+
+    var_p = σ_GPS ** 2 
+    var_s = σ_GYR ** 2 + σ_ACC ** 2 * DT
+    var_a = σ_ACC ** 2
+
+    noise_position = np.array([
+        [var_p, 0    , 0    , 0, 0, 0],
+        [0    , var_p, 0    , 0, 0, 0],
+        [0    , 0    , var_p, 0, 0, 0],
+        [0    , 0    , 0    , 0, 0, 0],
+        [0    , 0    , 0    , 0, 0, 0],
+        [0    , 0    , 0    , 0, 0, 0],
+    ])
+
+    noise_acceleration = np.array([
+        [DT**2 / 2 * var_a, 0                , 0                , DT**2 / 2 * var_a, 0                , 0                ],
+        [0                , DT**2 / 2 * var_a, 0                , 0                , DT**2 / 2 * var_a, 0                ],
+        [0                , 0                , DT**2 / 2 * var_a, 0                , 0                , DT**2 / 2 * var_a],
+        [0                , 0                , 0                , DT * var_a       , 0                , 0                ],
+        [0                , 0                , 0                , 0                , DT * var_a       , 0                ],
+        [0                , 0                , 0                , 0                , 0                , DT * var_a       ],
+    ])
+    
+    noise_speed = np.array([
+        [0, 0, 0, DT * var_s, 0         , 0         ],
+        [0, 0, 0, 0         , DT * var_s, 0         ],
+        [0, 0, 0, 0         , 0         , DT * var_s],
+        [0, 0, 0,var_s      , 0         , 0         ],
+        [0, 0, 0, 0         ,var_s      , 0         ],
+        [0, 0, 0, 0         , 0         ,var_s      ],
+    ])
+
+    noise = np.dot(continous_position, noise_position) + np.dot(continous_acceleration, noise_acceleration) + np.dot(continous_speed, noise_speed)
+    f.Q = np.dot(np.dot(f.F, noise), f.F.T)
+    # integrer le tout
+    f.Q *= DT
+
+    # measurement uncertainty
+    f.R = np.array([  
+                    [σ_GPS**2, 0       , 0       ],
+                    [0       , σ_GPS**2, 0       ],
+                    [0       , 0       , σ_GPS**2]
+                ])
+    
+    f.P = np.array([
+                    [σ_GPS**2, 0       , 0       , 0                       , 0                       , 0                       ],
+                    [0       , σ_GPS**2, 0       , 0                       , 0                       , 0                       ],
+                    [0       , 0       , σ_GPS**2, 0                       , 0                       , 0                       ],
+                    [0       , 0       , 0       , σ_ACC**2 + σ_GYR**2 * DT, 0                       , 0                       ],
+                    [0       , 0       , 0       , 0                       , σ_ACC**2 + σ_GYR**2 * DT, 0                       ],
+                    [0       , 0       , 0       , 0                       , 0                       , σ_ACC**2 + σ_GYR**2 * DT]
+                ])
+
+
+    return f
 
         
-        
-        
 def mainLoop(udp_socket):
-    predict: Motion = Motion(position=[Axis(X=0, Y=0, Z=0)], speed=[0.0], speed3d=[Axis(X=0, Y=0, Z=0)], acceleration=[Axis(X=0, Y=0, Z=0)], direction=[EulerAngles(ψ=0, θ=0, φ=0)])
-    debug: Motion = Motion(position=[Axis(X=0, Y=0, Z=0)], speed=[0.0], speed3d=[Axis(X=0, Y=0, Z=0)], acceleration=[Axis(X=0, Y=0, Z=0)], direction=[EulerAngles(ψ=0, θ=0, φ=0)])
+    global TIME
+    
+    args = parser.parse_args()
+    predict: Motion = Motion(position=[], speed=[], speed3d=[], acceleration=[], direction=[])
+    debug: Motion = Motion(position=[], speed=[], speed3d=[], acceleration=[], direction=[])
+    variances = np.empty((0, 5), np.float32)
     first_time = True
     data = b""
+    f = setMatrix()
     while True:
         while data != "MSG_START".encode():
             try:
                 data, _ = udp_socket.recvfrom(1024)
             except TimeoutError as e:
-                print("Error:", e.args)
-                displayGraph3D(predict, debug)
-                displayGraph2D(predict, debug)
-                exit(1)
-        getData(udp_socket, predict, debug, first_time)
-        print(f"predicted position: X={predict.position[-1].X} Y={predict.position[-1].Y} Z={predict.position[-1].Z}")
+                endProg(udp_socket, predict, debug, variances, e, TIME)
+        variances = getData(udp_socket, predict, debug, first_time, f, variances, args)
         udp_socket.sendto(f"{predict.position[-1].X} {predict.position[-1].Y} {predict.position[-1].Z}".encode(), ("127.0.0.1", 4242))
         first_time = False
 
@@ -104,10 +192,10 @@ def ft_kalman():
     buff = []
     udp_socket.bind((adresse, port))
     udp_socket.settimeout(1.0)
-
     udp_socket.sendto("READY".encode(), ("127.0.0.1", 4242))
     mainLoop(udp_socket)
     udp_socket.close()
 
 if __name__ == "__main__":
+    parser.add_argument('--debug', '-d', action='store_true', help='Activer le mode debug')
     ft_kalman()

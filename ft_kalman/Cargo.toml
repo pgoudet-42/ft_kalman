@@ -6,4 +6,5 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-gnuplot = "0.0.39"
+chrono = "0.4.38"
+nalgebra = "0.33.2"

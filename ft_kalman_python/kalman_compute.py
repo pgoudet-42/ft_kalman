@@ -1,73 +1,60 @@
 import numpy as np
 from structs import Axis, Motion, EulerAngles
+from filterpy.kalman import KalmanFilter
+from datetime import datetime
 
-def scalarSpeedTo3DSpeed(vector: Axis, speed):
-    speed3D: Axis = Axis(
-        X = speed * vector.X,
-        Y = speed * vector.Y,
-        Z = speed * vector.Z
-    )
-    return speed3D
+def rotationMatrix(direction):
+    ψ, θ, φ = direction.ψ, direction.θ, direction.φ
 
-def speed3DToScalar(speed3d: Axis):
-    return np.sqrt(speed3d.X ** 2 + speed3d.Y ** 2 + speed3d.Z ** 2)
-
-def changeRefWithEuler(vec, ψ, θ, φ):
-    A = np.array([
-        [ np.cos(ψ)*np.cos(φ) - np.sin(ψ)*np.cos(θ)*np.sin(φ), -np.cos(ψ)*np.cos(φ) - np.sin(ψ)*np.cos(θ)*np.sin(φ), np.sin(ψ)*np.sin(θ)  ],
-        [ np.sin(ψ)*np.cos(φ) + np.cos(ψ)*np.cos(θ)*np.sin(φ), -np.sin(ψ)*np.sin(φ) + np.cos(ψ)*np.cos(θ)*np.cos(φ), -np.cos(ψ)*np.sin(θ) ],
-        [ np.sin(θ)*np.sin(φ)                                   , np.sin(θ)*np.cos(φ)                                 , np.cos(θ)         ],
+    R_z = np.array([
+        [np.cos(ψ), -np.sin(ψ), 0],
+        [np.sin(ψ), np.cos(ψ), 0],
+        [0, 0, 1]
     ])
-    return np.dot(A.T, vec)
 
-def computeNewPosition(predict: Motion):
-    time = 1/300
-    acceleration = np.array([predict.acceleration[-1].X, predict.acceleration[-1].Y, predict.acceleration[-1].Z])
-    old_position = np.array([predict.position[-1].X, predict.position[-1].Y, predict.position[-1].Z])
-    speed3d = np.array([predict.speed3d[-1].X, predict.speed3d[-1].Y, predict.speed3d[-1].Z])
-    new_position = old_position + speed3d * time + 1/2 * acceleration * time ** 2
-    return Axis(X=new_position[0], Y=new_position[1], Z=new_position[2])
-
-def predictState(predict):
-    σv = 0.001
-    time = 1/300
-    
-    state = np.array([
-        predict.position.X[-1],
-        predict.position.Y[-1],
-        predict.position.Z[-1],
-        predict.speed3d.X[-1],
-        predict.speed3d.Y[-1],
-        predict.speed3d.Z[-1],
-        predict.acceleration.X[-1],
-        predict.acceleration.Y[-1],
-        predict.acceleration.Z[-1],
+    R_y = np.array([
+        [np.cos(θ), 0, np.sin(θ)],
+        [0, 1, 0],
+        [-np.sin(θ), 0, np.cos(θ)]
     ])
-    
-    F = np.array([
-        [1, 0, 0, time, 0    , 0   , 0.5*time**2, 0          , 0          ],
-        [0, 1, 0, 0   , time , 0   , 0          , 0.5*time**2, 0          ],
-        [0, 0, 1, 0   , 0    , time, 0          , 0          , 0.5*time**2],
-        [0, 0, 0, 1   , 0    , 0   , time       , 0          , 0          ],
-        [0, 0, 0, 0   , 1    , 0   , 0          , time       , 0          ],
-        [0, 0, 0, 0   , 0    , 1   , 0          , 0          , time       ],
-        [0, 0, 0, 0   , 0    , 0   , 1          , 0          , 0          ],
-        [0, 0, 0, 0   , 0    , 0   , 0          , 1          , 0          ],
-        [0, 0, 0, 0   , 0    , 0   , 0          , 0          , 1          ],
-    ])
-    new_state = np.dot(F, state)
-    predict.position.append(predict.position)
 
-def calculateNewCoordonates(predict: Motion, new_acceleration: Axis, new_orientation: EulerAngles):
-    v = np.array([predict.direction[-1].ψ, predict.direction[-1].θ, predict.direction[-1].φ])
-    vector = changeRefWithEuler([1,1,1], new_orientation.ψ, new_orientation.θ, new_orientation.φ)
-    norm = np.linalg.norm(vector)
-    vector_normalise = vector / norm
-    vector_normalise = Axis(X=vector_normalise[0], Y=vector_normalise[1], Z=vector_normalise[2])
-    speed3D = scalarSpeedTo3DSpeed(vector_normalise, np.float64(predict.speed[-1]))
-    predict.speed3d.append(speed3D)
+    R_x = np.array([
+        [1, 0, 0],
+        [0, np.cos(φ), -np.sin(φ)],
+        [0, np.sin(φ), np.cos(φ)]
+    ])
+
+    R = np.dot(R_z, np.dot(R_y, R_x))
+    return R
+
+def computeVelocity(direction, acceleration, velocity, dt):
+    R = rotationMatrix(direction)
+
+    acc = np.dot(R, acceleration.to_nparray())
+    velocity[0] += acc[0] * dt
+    velocity[1] += acc[1] * dt
+    velocity[2] += acc[2] * dt
     
-    predict.speed.append(speed3DToScalar(predict.speed3d[-1]))
+    return velocity, acc
+
+def calculateNewCoordonates(predict: Motion, new_acceleration: Axis, new_orientation: EulerAngles, f: KalmanFilter, args, gps: Axis=None, debug: Motion=None, time: datetime=None):
+
     predict.acceleration.append(new_acceleration)
     predict.direction.append(new_orientation)
-    predict.position.append(computeNewPosition(predict))
+    ψ, θ, φ = predict.direction[-1].ψ, predict.direction[-1].θ, predict.direction[-1].φ
+
+    acc_global = predict.acceleration[-1].to_nparray()
+
+    f.predict(u=acc_global)
+    predict.position.append(Axis(float(f.x[0][0]), float(f.x[1][0]), float(f.x[2][0])))
+    predict.speed.append(np.linalg.norm(np.array([f.x[3][0], f.x[4][0], f.x[5][0]])))
+    predict.speed3d.append(Axis(float(f.x[3][0]), float(f.x[4][0]), float(f.x[5][0])))
+
+    if gps.is_notinitialized() == False:
+        f.update(gps.to_nparray())
+    elif args.debug:
+        if time.second > 0 and time.microsecond == 0 and time.second % 3 == 0:
+            f.update(debug.position[-1].to_nparray())
+        
+    
+

@@ -1,90 +1,161 @@
-// mod utils;
-// use utils::{Axis, Motion, Vector};
-// use numpy::ndarray::Array2;
-// use numpy::ndarray::Array1;
+#![allow(non_snake_case)]
+use nalgebra::{Matrix3, Matrix3x1, Matrix3x6, Matrix6, Matrix6x1, Matrix6x3};
 
-// // fn state_equ(motion: &mut Motion, known_entries: Motion, random_signals: Motion ) {
-// //     motion = a * motion + b * known_entries + m * random_signals;
-// // }
 
-// // fn mesure_equ(motion: &mut Motion, known_entries: Motion, mesure_vector: Motion ) {
-// //     motion = c * motion + d * known_entries + mesure_vector;
-// // }
+/// KlamanFilter struct
+/// dt is the delta time between each sensor data received
+/// x is the state vector
+/// F is the Transition matrix
+/// B is the control matrix
+/// H is the measurement matrix
+/// Q is the process noise matrix
+/// R is the measurement uncertainty
+/// P is the covariance matrix
+pub struct KalmanFilter {
+        y: Matrix3x1<f64>,
+    pub x: Matrix6x1<f64>,
+    pub F: Matrix6<f64>, 
+    pub B: Matrix6x3<f64>,
+    pub H: Matrix3x6<f64>,
+    pub Q: Matrix6<f64>,
+    pub R: Matrix3<f64>,
+    pub P: Matrix6<f64>,
+        S: Matrix3<f64>,
+        K: Matrix6x3<f64>,
+        I: Matrix6<f64>
+}
 
-// struct Kalman_Filter {
-//     dt: float64,
-//     E: Array1,
-//     A: Array2,
-//     H: Array2,
-//     Q: Array2,
-//     R: Array2,
-//     P: Array2,
-// }
+impl KalmanFilter {
+    pub fn predict(&mut self, u: &Matrix3x1<f64>) {
+        self.x = self.F * self.x + self.B * u;
+        self.P = self.F * self.P * self.F.transpose() + self.Q;
+    }
 
-// impl Kalman_Filter {
-//     fn get_vectors_init_state(motion: &mut Motion) {
-//         vec = Array1::new([
-//             motion.location.X,
-//             motion.location.Y,
-//             motion.location.Z,
-//             motion.acceleration.X,
-//             motion.acceleration.Y,
-//             motion.acceleration.Z,
-//         ]);
-//         return (vec);
-//     }
+    pub fn update(&mut self, z: &Matrix3x1<f64>) {
+        self.y = z - self.H * self.x;
+        // # S = HPH' + R
+        // # project system uncertainty into measurement space
+        self.S = self.H * self.P * self.H.transpose() + self.R;
+        // map system uncertainty into kalman gain
+        self.K = self.P * self.H.transpose() * self.S.try_inverse().unwrap();
+        // # x = x + Ky
+        // # predict new x with residual scaled by the kalman gain
+        self.x = self.x + self.K * self.y;
+        // # P = (I-KH)P(I-KH)' + KRK'
+        // # This is more numerically stable
+        // # and works for non-optimal K vs the equation
+        // # P = (I-KH)P usually seen in the literature.
+        let i_kh = self.I - self.K * self.H;
+        self.P = i_kh * self.P * i_kh.transpose() + self.K * self.R * self.K.transpose();
+    }
+}
 
-//     fn get_observation_matrice(motion: &mut Motion) {
-//         let matrice = Array2::new([
-//             [1.0, 0, 0, 0, 0, 0],
-//             [0, 1.0, 0, 0, 0, 0],
-//             [0, 0, 1.0, 0, 0, 0],
-//         ]);
-//         return (matrice);
-//     }
+pub fn create_filter(dt: f64, init_state: Matrix6x1<f64>) -> KalmanFilter {
+    let σ_gps = 10_f64.powi(-1);
+    let σ_acc = 10_f64.powi(-3);
+    let σ_gyr = 10_f64.powi(-2);
 
-//     fn get_transition_matrice(motion: &mut Motion, dt: float) {
-//         let matrice = Array2::new([
-//             [1.0, 0, 0, dt, 0, 0],
-//             [0, 1.0, 0, 0 ,dt, 0],
-//             [0, 0, 1.0, 0, 0, dt],
-//             [0, 0, 0, 1.0, 0, 0],
-//             [0, 0, 0, 0, 1.0, 0],
-//             [0, 0, 0, 0, 0, 1.0],
-//         ]);
-//         return (matrice);
-//     }
+    let F: Matrix6<f64> = Matrix6::new(
+        1.0, 0.0, 0.0, dt, 0.0, 0.0,
+        0.0, 1.0, 0.0, 0.0 ,dt, 0.0,
+        0.0, 0.0, 1.0, 0.0, 0.0, dt,
+        0.0, 0.0, 0.0, 1.0, 0.0, 0.0,
+        0.0, 0.0, 0.0, 0.0, 1.0, 0.0,
+        0.0, 0.0, 0.0, 0.0, 0.0, 1.0,
+    );
 
-//     fn get_noise_state_matrice() {
-//         let matrice = Array2::new([
-//             [1.0, 0, 0, 0, 0, 0],
-//             [0, 1.0, 0, 0, 0, 0],
-//             [0, 0, 1.0, 0, 0, 0],
-//             [0, 0, 0, 1.0, 0, 0],
-//             [0, 0, 0, 0, 1.0, 0],
-//             [0, 0, 0, 0, 0, 1.0],
-//         ]);
-//         return (matrice);
-//     }
+    let H: Matrix3x6<f64> = Matrix3x6::new(
+        1.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+        0.0, 1.0, 0.0, 0.0 ,0.0, 0.0,
+        0.0, 0.0, 1.0, 0.0, 0.0, 0.0
+    );
 
-//     fn get_noise_mesures_matrice() {
-//         let matrice = Array2::new([
-//             [1.0, 0, 0],
-//             [0, 1.0, 0],
-//             [0, 0, 1.0],
-//         ]);
-//         return (matrice);
-//     }
+    let B: Matrix6x3<f64> = Matrix6x3::new(
+        dt.powi(2) / 2.0, 0.0             , 0.0             ,
+        0.0             , dt.powi(2) / 2.0, 0.0             ,
+        0.0             , 0.0             , dt.powi(2) / 2.0,
+        dt              , 0.0             , 0.0             ,
+        0.0             , dt              , 0.0             ,
+        0.0             , 0.0             , dt              
+    );
 
-//     fn predict_state(motion: &mut Motion, dt: int) {
-//         self.A = get_transition_matrice(dt);
-//         self.E =  self.A.dot(self.E); // location predition
+    let continous_position: Matrix6<f64> = Matrix6::new(
+        dt.powi(2) / 2.0, 0.0              , 0.0               , 0.0, 0.0, 0.0,
+        0.0             , dt.powi(2) / 2.0 , 0.0               , 0.0, 0.0, 0.0,
+        0.0             , 0.0              , dt.powi(2) / 2.0  , 0.0, 0.0, 0.0,
+        0.0             , 0.0              , 0.0               , 0.0, 0.0, 0.0,
+        0.0             , 0.0              , 0.0               , 0.0, 0.0, 0.0,
+        0.0             , 0.0              , 0.0               , 0.0, 0.0, 0.0
+    );
 
-//         self.P = (self.A.dot(self.P)).dot(self.A.T) + self.Q;
-//         return self.E
-//     }
+    let continous_acceleration: Matrix6<f64> = Matrix6::new(
+        dt.powi(2) / 2.0, 0.0              , 0.0               , dt.powi(2) / 2.0  , 0.0               , 0.0               ,
+        0.0             , dt.powi(2) / 2.0 , 0.0               , 0.0               , dt.powi(2) / 2.0  , 0.0               ,
+        0.0             , 0.0              , dt.powi(2) / 2.0  , 0.0               , 0.0               , dt.powi(2) / 2.0  ,
+        0.0             , 0.0              , 0.0               , dt                , 0.0               , 0.0               ,
+        0.0             , 0.0              , 0.0               , 0.0               , dt                , 0.0               ,
+        0.0             , 0.0              , 0.0               , 0.0               , 0.0               , dt                
+    );
 
-//     fn update_state(motion: &mut Motion) {
-//         ...
-//     }
-// }
+    let continous_speed: Matrix6<f64> = Matrix6::new(
+        0.0, 0.0, 0.0, dt.powi(2) / 2.0, 0.0               , 0.0               ,
+        0.0, 0.0, 0.0, 0.0             , dt.powi(2) / 2.0  , 0.0               ,
+        0.0, 0.0, 0.0, 0.0             , 0.0               , dt.powi(2) / 2.0  ,
+        0.0, 0.0, 0.0, dt              , 0.0               , 0.0               ,
+        0.0, 0.0, 0.0, 0.0             , dt                , 0.0               ,
+        0.0, 0.0, 0.0, 0.0             , 0.0               , dt                
+    );
+
+    let var_p = σ_gps.powi(2);
+    let var_s = σ_gyr.powi(2) + σ_acc.powi(2) * dt;
+    let var_a = σ_acc.powi(2);
+
+    let noise_position = Matrix6::new(
+        var_p, 0.0  , 0.0  , 0.0, 0.0, 0.0,
+        0.0  , var_p, 0.0  , 0.0, 0.0, 0.0,
+        0.0  , 0.0  , var_p, 0.0, 0.0, 0.0,
+        0.0  , 0.0  , 0.0  , 0.0, 0.0, 0.0,
+        0.0  , 0.0  , 0.0  , 0.0, 0.0, 0.0,
+        0.0  , 0.0  , 0.0  , 0.0, 0.0, 0.0
+    );
+
+    let noise_acceleration = Matrix6::new(
+        dt.powi(2) / 2.0 * var_a, 0.0                     , 0.0                     , dt.powi(2) / 2.0 * var_a, 0.0                     , 0.0                     ,
+        0.0                     , dt.powi(2) / 2.0 * var_a, 0.0                     , 0.0                     , dt.powi(2) / 2.0 * var_a, 0.0                     ,
+        0.0                     , 0.0                     , dt.powi(2) / 2.0 * var_a, 0.0                     , 0.0                     , dt.powi(2) / 2.0 * var_a,
+        0.0                     , 0.0                     , 0.0                     , dt * var_a              , 0.0                     , 0.0                     ,
+        0.0                     , 0.0                     , 0.0                     , 0.0                     , dt * var_a              , 0.0                     ,
+        0.0                     , 0.0                     , 0.0                     , 0.0                     , 0.0                     , dt * var_a              
+    );
+    
+    let noise_speed = Matrix6::new(
+        0.0, 0.0, 0.0, dt * var_s, 0.0       , 0.0       ,
+        0.0, 0.0, 0.0, 0.0       , dt * var_s, 0.0       ,
+        0.0, 0.0, 0.0, 0.0       , 0.0       , dt * var_s,
+        0.0, 0.0, 0.0, var_s     , 0.0       , 0.0       ,
+        0.0, 0.0, 0.0, 0.0       ,var_s      , 0.0       ,
+        0.0, 0.0, 0.0, 0.0       , 0.0       ,var_s      
+    );
+
+    let noise: Matrix6<f64> = continous_position * noise_position + continous_acceleration * noise_acceleration + continous_speed * noise_speed;
+    let mut Q: Matrix6<f64> = F * noise* F.transpose();
+    // integrer le tout
+    Q *= dt;
+
+    let R: Matrix3<f64> = Matrix3::new(
+        σ_gps.powi(2)  , 0.0           , 0.0           ,
+        0.0            , σ_gps.powi(2) , 0.0           ,
+        0.0            , 0.0           , σ_gps.powi(2) 
+    );
+
+    let P: Matrix6<f64> = Matrix6::new(
+        σ_gps.powi(2)  , 0.0           , 0.0           , 0.0                           , 0.0                           , 0.0                           ,
+        0.0            , σ_gps.powi(2) , 0.0           , 0.0                           , 0.0                           , 0.0                           ,
+        0.0            , 0.0           , σ_gps.powi(2) , 0.0                           , 0.0                           , 0.0                           ,
+        0.0            , 0.0           , 0.0           , σ_acc.powi(2) + σ_gyr.powi(2) , 0.0                           , 0.0                           ,
+        0.0            , 0.0           , 0.0           , 0.0                           , σ_acc.powi(2) + σ_gyr.powi(2) , 0.0                           ,
+        0.0            , 0.0           , 0.0           , 0.0                           , 0.0                           , σ_acc.powi(2) + σ_gyr.powi(2) 
+    );
+
+    return KalmanFilter{y: Matrix3x1::zeros(), x: init_state, F: F, B: B, H: H, Q: Q, R: R, P: P, S: Matrix3::zeros(), K: Matrix6x3::zeros(), I: Matrix6::identity()};
+}

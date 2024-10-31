@@ -1,0 +1,19 @@
+# Filtre de Kalman en Python et Rust
+
+Ce projet implémente un filtre de Kalman à la fois en Python et en Rust. Le code Python affiche un graphique des résultats, tandis que l'implémentation Rust ne fournit pas de visualisation graphique.
+
+## Prérequis
+
+Avant de commencer, assurez-vous d'avoir installé les dépendances nécessaires.
+
+### Python
+
+**Créer un environnement virtuel :**
+    python3 -m venv venv
+    source venv/bin/activate
+    pip install -r requirements.txt
+
+### Python et rust
+
+Les 2 dossiers utilisent un fichier start.sh pour lancer les programmes. Pensez a mettre les droits d'execution sur les fichiers imu-sensor-stream-linux et start.sh
+Le fichier imu-sensor-stream-linux est pour linux. il ne ofnctionnera pas sur windows ou mac.
