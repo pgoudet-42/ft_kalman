@@ -1,4 +1,4 @@
 ft_kalman_python/venv
 ft_kalman_python/.vscode
 ft_kalman_python/__pycache__
-debug
+ft_kalman/target/debug
