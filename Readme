@@ -13,7 +13,12 @@ Avant de commencer, assurez-vous d'avoir installé les dépendances nécessaires
     source venv/bin/activate
     pip install -r requirements.txt
 
+
+### Rust
+
+Il est necessaire d'avoir installe cargo pour rust ou rustc pour utiliser le dossier ft_kalman
+
 ### Python et rust
 
 Les 2 dossiers utilisent un fichier start.sh pour lancer les programmes. Pensez a mettre les droits d'execution sur les fichiers imu-sensor-stream-linux et start.sh
-Le fichier imu-sensor-stream-linux est pour linux. il ne ofnctionnera pas sur windows ou mac.
+Le fichier imu-sensor-stream-linux est pour linux. il a ete teste sur debian 11 et ne fonctionnera pas sur windows ou mac.
